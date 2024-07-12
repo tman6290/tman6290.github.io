@@ -1,2 +1,2 @@
 # tman6290.github.io
-This is where I host a simple art portfolio website I made for myself using HTML, CSS and JavaScript
+ Made a basic portfolio website template from scratch using HTML, CSS and JavaScript.
