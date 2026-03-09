@@ -701,7 +701,9 @@ p { color: var(--text-2); line-height: 1.75; }
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; z-index: 10001;
   transition: all var(--ease);
+  visibility: hidden; opacity: 0; pointer-events: none;
 }
+#lightbox.active #lb-close { visibility: visible; opacity: 1; pointer-events: all; }
 #lb-close:hover { background: var(--accent); border-color: var(--accent); }
 
 .lb-arrow {
@@ -714,7 +716,9 @@ p { color: var(--text-2); line-height: 1.75; }
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; z-index: 10001;
   transition: all var(--ease);
+  visibility: hidden; opacity: 0; pointer-events: none;
 }
+#lightbox.active .lb-arrow { visibility: visible; opacity: 1; pointer-events: all; }
 .lb-arrow:hover { background: var(--accent); border-color: var(--accent); transform: translateY(-50%) scale(1.1); }
 #lb-prev { left: 1.25rem; }
 #lb-next { right: 1.25rem; }
