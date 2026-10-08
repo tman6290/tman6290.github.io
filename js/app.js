@@ -7,21 +7,33 @@
    ===================================================================== */
 const fctx = fx.getContext('2d');
 const qs = new URLSearchParams(location.search);
-let W = innerWidth, H = innerHeight, DPR = Math.min(devicePixelRatio || 1, 1.5), q = qs.has('q') ? parseFloat(qs.get('q')) : .6;
-const qMin = qs.has('q') ? q : .3;
+// phones and tablets start the raymarched world at a lower resolution and may drop further
+const coarse = matchMedia('(pointer:coarse)').matches, small = innerWidth < 760;
+const lite = coarse || small;
+const dprCap = () => Math.min(devicePixelRatio || 1, lite ? 1.25 : 1.5);
+let W = Math.max(innerWidth, 1), H = Math.max(innerHeight, 1), DPR = dprCap();
+let q = qs.has('q') ? parseFloat(qs.get('q')) : (lite ? .42 : .6);
+const qMin = qs.has('q') ? q : (lite ? .24 : .3);
 let started = false, startT = 0;
 const secs = [...document.querySelectorAll('section.sec')];
 const projIds = ['icsp','rjl','wolban','earlier'];           // scene 1..4 anchors
 let anchors = [];   // document y of each scene anchor (h2 top)
 let secTops = [];
+const secBox = new Map();   // section -> { top, h }, so the frame loop never reads layout
+let docMax = 1;
+// all layout reads happen here, a few times a second at most, never inside the frame loop
 function measure(){
   const sy = scrollY;
   anchors = projIds.map(id => { const el = document.getElementById(id); const h = el.querySelector('h2'); return (h||el).getBoundingClientRect().top + sy; });
   secTops = secs.map(s => { const h = s.querySelector('h2'); return { top: (h||s).getBoundingClientRect().top + sy, el: s }; });
+  secs.forEach(s => { const r = s.getBoundingClientRect(); secBox.set(s, { top: r.top + sy, h: r.height }); });
+  docMax = Math.max(1, document.documentElement.scrollHeight - innerHeight);
 }
 function resize(){
-  W = innerWidth; H = innerHeight; DPR = Math.min(devicePixelRatio || 1, 1.5);
-  if (hasGL) { canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR); makeRT(Math.max(2, Math.round(W*q)), Math.max(2, Math.round(H*q))); }
+  W = innerWidth; H = innerHeight; DPR = dprCap();
+  if (W < 2 || H < 2) return;   // hidden or prerendered tab: wait for a real size
+  // the post pass is grain, bloom and aberration over a low-res scene, so it runs at 1x and the browser upscales
+  if (hasGL) { canvas.width = W; canvas.height = H; makeRT(Math.max(2, Math.round(W*q)), Math.max(2, Math.round(H*q))); }
   fx.width = Math.round(W*DPR); fx.height = Math.round(H*DPR);
   buildParticles(); measure();
   if (T3.ok) T3.resize();
@@ -32,7 +44,7 @@ function resize(){
    ===================================================================== */
 let parts = [];
 function buildParticles(){
-  if (!hasGL) { parts = []; return; }
+  if (!hasGL || W < 2 || H < 2) { parts = []; return; }
   const off = document.createElement('canvas'); off.width = W; off.height = H;
   const c = off.getContext('2d', { willReadFrequently:true });
   const lines = ['TOFARATI','FARINU'];
@@ -99,37 +111,31 @@ function drawParticles(T, dt, heroP, mx, my, A){
 }
 
 /* =====================================================================
-   QR PATTERN (illustrative)
-   ===================================================================== */
-(function(){
-  const svg = $('#qr1'); if (!svg) return;
-  let seed = 2026, s = '';
-  const rnd = () => { seed = (seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff; };
-  const finder = (x,y) => { s += `<rect x="${x}" y="${y}" width="7" height="7" fill="#15241b"/><rect x="${x+1}" y="${y+1}" width="5" height="5" fill="#fff"/><rect x="${x+2}" y="${y+2}" width="3" height="3" fill="#15241b"/>`; };
-  for (let y=0;y<21;y++) for (let x=0;x<21;x++) { const inF=(x<8&&y<8)||(x>12&&y<8)||(x<8&&y>12); if(!inF && rnd()>.55) s += `<rect x="${x}" y="${y}" width="1" height="1" fill="#15241b"/>`; }
-  finder(0,0); finder(14,0); finder(0,14); svg.innerHTML = s;
-})();
-
-/* =====================================================================
    INPUT: cursor, click ripple, magnetic buttons
    ===================================================================== */
 let mx = 0, my = 0, mxs = 0, mys = 0, pxx = -9999, pyy = -9999, lastMove = -99;
-const cur = $('.cur'), ring = $('.ring');
-let cx = -100, cy = -100, rx = -100, ry = -100;
+const ring = $('.ring');
+let cx = -100, cy = -100;
 let clickX = 0, clickY = 0, clickT = -99;
-if (matchMedia('(hover:hover) and (pointer:fine)').matches) document.body.classList.add('fine');
-addEventListener('pointermove', e => { cx = e.clientX; cy = e.clientY; pxx = cx; pyy = cy; mx = (cx/W)*2-1; my = -((cy/H)*2-1); lastMove = performance.now()/1000; ring.style.transform = `translate3d(${cx}px,${cy}px,0)`; }, { passive:true });
+const fine = matchMedia('(hover:hover) and (pointer:fine)').matches;
+if (fine) document.body.classList.add('fine');
+addEventListener('pointermove', e => { cx = e.clientX; cy = e.clientY; pxx = cx; pyy = cy; mx = (cx/W)*2-1; my = -((cy/H)*2-1); lastMove = performance.now()/1000; if (fine) ring.style.transform = `translate3d(${cx}px,${cy}px,0)`; }, { passive:true });
 addEventListener('pointerdown', e => {
   ring.classList.add('down');
   clickX = (e.clientX - W/2)/H; clickY = -(e.clientY - H/2)/H; clickT = performance.now()/1000;
   if (e.pointerType !== 'mouse') { mx = (e.clientX/W)*2-1; my = -((e.clientY/H)*2-1); pxx = e.clientX; pyy = e.clientY; lastMove = clickT; }
 });
 addEventListener('pointerup', () => ring.classList.remove('down'));
-document.addEventListener('pointerover', e => ring.classList.toggle('hot', !!(e.target.closest && e.target.closest('button,a,[data-hover]'))));
-document.querySelectorAll('.btn').forEach(b => {
-  b.addEventListener('pointermove', e => { const r = b.getBoundingClientRect(); b.style.transform = `translate(${(e.clientX - r.left - r.width/2)*.22}px,${(e.clientY - r.top - r.height/2)*.35}px)`; });
-  b.addEventListener('pointerleave', () => { b.style.transform = ''; });
-});
+if (fine) {
+  document.addEventListener('pointerover', e => ring.classList.toggle('hot', !!(e.target.closest && e.target.closest('button,a,[data-hover]'))));
+  // magnetic buttons, mouse only: on touch they would jump under the finger
+  document.querySelectorAll('.btn').forEach(b => {
+    let r = null;
+    b.addEventListener('pointerenter', () => { r = b.getBoundingClientRect(); });
+    b.addEventListener('pointermove', e => { if (!r) return; b.style.transform = `translate(${(e.clientX - r.left - r.width/2)*.22}px,${(e.clientY - r.top - r.height/2)*.35}px)`; });
+    b.addEventListener('pointerleave', () => { r = null; b.style.transform = ''; });
+  });
+}
 
 /* =====================================================================
    CHAPTERS, DOTS, FLY-TO, SCRAMBLE
@@ -175,7 +181,7 @@ function scramble(el, final, dur){
     const t = clamp((performance.now() - t0)/dur, 0, 1);
     const reveal = Math.floor(t*final.length*1.15);
     let out = '';
-    for (let i = 0; i < final.length; i++) out += (final[i] === ' ' || i < reveal) ? final[i] : GLYPH[Math.random()*GLYPH.length|0];
+    for (let i = 0; i < final.length; i++) out += (final[i] === ' ' || final[i] === '\u200b' || i < reveal) ? final[i] : GLYPH[Math.random()*GLYPH.length|0];
     el.textContent = out;
     if (t < 1) el._r = requestAnimationFrame(step); else el.textContent = final;
   };
@@ -196,10 +202,14 @@ function setSection(sec){
   scramble(chapEl, '0' + ch + ' / ' + sec.dataset.name, 700);
   const h = sec.querySelector('h2[data-f]');
   if (h && !h._done) { h._done = true; scramble(h, h.dataset.f, 900); }
-  menuLinks.forEach(a => a.classList.toggle('on', a.dataset.m === menuMap[sec.id]));
-  PCOL[1] = hexRGB(getComputedStyle(document.documentElement).getPropertyValue('--ice')).join(',');
-  PCOL[3] = hexRGB(getComputedStyle(document.documentElement).getPropertyValue('--vio')).join(',');
+  menuLinks.forEach(a => { const on = a.dataset.m === menuMap[sec.id]; a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current'); });
+  // read the theme colours once per chapter change; the frame loop eases toward these
+  const cs = getComputedStyle(document.documentElement);
+  const ice = hexRGB(cs.getPropertyValue('--ice')), vio = hexRGB(cs.getPropertyValue('--vio'));
+  tintA = ice.map(v => v/255); tintB = vio.map(v => v/255);
+  PCOL[1] = ice.join(','); PCOL[3] = vio.join(',');
 }
+let tintA = [1,.55,.26], tintB = [1,.18,.31];
 
 /* =====================================================================
    START
@@ -216,7 +226,7 @@ function begin(){
 (function(){ let done = false; const go = () => { if (done) return; done = true; begin(); };
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => setTimeout(go, 450)); setTimeout(go, 1400); })();
 addEventListener('keydown', e => {
-  if (!started) return;
+  if (!started || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); goTo(CHAP[clamp(activeCh+1,0,CHAP.length-1)].id); }
   if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); goTo(CHAP[clamp(activeCh-1,0,CHAP.length-1)].id); }
 });

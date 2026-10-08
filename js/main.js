@@ -10,6 +10,8 @@ let lastW = innerWidth, lastH = innerHeight;
 addEventListener('resize', () => { if (innerWidth === lastW && Math.abs(innerHeight - lastH) < lastH*.25) return; lastW = innerWidth; lastH = innerHeight; resize(); });
 addEventListener('load', measure);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { buildParticles(); measure(); });
+// re-measure whenever the page's height changes (fonts, lazy images, orientation), not on a timer
+if (window.ResizeObserver) new ResizeObserver(() => measure()).observe(document.querySelector('main'));
 scrollTo(0, 0);
 $('#load').textContent = hasGL ? 'ORBIT CALIBRATED: READY' : 'WEBGL2 UNAVAILABLE: STATIC MODE';
 
@@ -18,11 +20,12 @@ let frameAcc = 0, frameN = 0, cool = 0, hidden = false, measT = 0;
 const tV = $('#tV'), tD = $('#tD'), tL = $('#tL'), bar = $('#bar'), pcbEl = $('#pcb');
 const uA = [1.,.55,.26], uB = [1.,.18,.31];
 function readTint(){
-  const cs = getComputedStyle(document.documentElement);
-  const a = hexRGB(cs.getPropertyValue('--ice')), b = hexRGB(cs.getPropertyValue('--vio'));
-  uA[0] += (a[0]/255 - uA[0])*.02; uA[1] += (a[1]/255 - uA[1])*.02; uA[2] += (a[2]/255 - uA[2])*.02;
-  uB[0] += (b[0]/255 - uB[0])*.02; uB[1] += (b[1]/255 - uB[1])*.02; uB[2] += (b[2]/255 - uB[2])*.02;
+  for (let i = 0; i < 3; i++) { uA[i] += (tintA[i] - uA[i])*.02; uB[i] += (tintB[i] - uB[i])*.02; }
 }
+// DOM writes are skipped when the value has not changed, so idle frames touch nothing
+const last$ = new WeakMap();
+function put(el, prop, val){ if (last$.get(el) === val) return; last$.set(el, val); if (prop === 'text') el.textContent = val; else el.style[prop] = val; }
+let scrolledOn = false;
 document.addEventListener('visibilitychange', () => { hidden = document.hidden; if (!hidden) { last = performance.now()/1000; requestAnimationFrame(frame); } });
 
 function frame(nowMs){
@@ -31,11 +34,12 @@ function frame(nowMs){
   const now = nowMs/1000;
   let dt = Math.min(.1, now - last); last = now; if (dt <= 0) return;
   if (!reduce) T += dt;
-  if (now - measT > 1.5) { measure(); measT = now; }
+  if (now - measT > 4) { measure(); measT = now; }
 
   if (flying) { const t = clamp((performance.now() - flying.t0)/flying.dur, 0, 1); scrollTo(0, lerp(flying.y0, flying.y, ease(t))); if (t >= 1) flying = null; }
   const target = scrollY;
   sm += (target - sm)*(1 - Math.exp(-dt*6));
+  if ((target > 40) !== scrolledOn) { scrolledOn = target > 40; document.body.classList.toggle('scrolled', scrolledOn); }
   const vel = (sm - prevSm)/dt/H; prevSm = sm;
   sVel += (vel - sVel)*(1 - Math.exp(-dt*8));
   stretch += ((1 + Math.min(Math.abs(sVel)*7, 10)) - stretch)*(1 - Math.exp(-dt*6));
@@ -57,7 +61,8 @@ function frame(nowMs){
   }
   sceneS = sv;
   // progress inside the active chapter
-  const aTop = activeSec ? activeSec.offsetTop : 0, aH = activeSec ? activeSec.offsetHeight : H;
+  const box = activeSec && secBox.get(activeSec);
+  const aTop = box ? box.top : 0, aH = box ? box.h : H;
   const prog = clamp((sm - aTop + H*.5)/Math.max(1, aH), 0, 1);
 
   // pointer smoothing + idle wander
@@ -72,7 +77,7 @@ function frame(nowMs){
   fade += ((started ? 1 : .55) - fade)*(1 - Math.exp(-dt*1.6));
   const dim = 1 - .38*smooth(.5, 1.3, sm/H);
 
-  if (hasGL) {
+  if (hasGL && rt.fbo) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, rt.fbo); gl.viewport(0, 0, rt.w, rt.h); gl.useProgram(P1.p);
     gl.uniform2f(P1.u.uRes, rt.w, rt.h); gl.uniform1f(P1.u.uTime, T); gl.uniform1f(P1.u.uScene, sceneS); gl.uniform1f(P1.u.uProg, prog);
     gl.uniform1f(P1.u.uTravel, travel); gl.uniform1f(P1.u.uStretch, reduce ? 1 : stretch);
@@ -87,7 +92,7 @@ function frame(nowMs){
   }
 
   // circuit layer parallax
-  pcbEl.style.transform = `translate3d(${(mxs*-18).toFixed(1)}px,${(mys*14 - (sm%H)*.04).toFixed(1)}px,0)`;
+  if (activeCh === 0 || activeCh === 5) put(pcbEl, 'transform', `translate3d(${(mxs*-18).toFixed(1)}px,${(mys*14 - (sm%H)*.04).toFixed(1)}px,0)`);
 
   // relics + screen tilt
   if (T3.ok) {
@@ -95,19 +100,21 @@ function frame(nowMs){
     let p = 1;
     if (key === 'core') p = activeSec && activeSec.id === 'contact' ? 1 - smooth(0, .35, prog) : (started ? Math.max(smooth(.1, .75, sm/H), 1 - assemble) : 1);
     else p = (1 - smooth(0, .3, prog)) + smooth(.74, 1, prog);
-    const par = activeSec ? -((sm + H*.5) - (activeSec.offsetTop + activeSec.offsetHeight*.5))/H*1.6 : 0;
+    const par = box ? -((sm + H*.5) - (aTop + aH*.5))/H*1.6 : 0;
     T3.frame(key, clamp(p,0,1), T, dt, mxs, mys, clamp(par,-2,2));
-    if (activeSec) { const core = activeSec.querySelector('.core'); if (core) core.style.transform = `rotateY(${(mxs*7).toFixed(2)}deg) rotateX(${(-mys*5).toFixed(2)}deg)`; }
   }
+  // screenshot tilt follows the mouse; touch devices keep it flat
+  if (fine && activeSec) { const core = activeSec.querySelector('.core'); if (core) put(core, 'transform', `rotateY(${(mxs*7).toFixed(1)}deg) rotateX(${(-mys*5).toFixed(1)}deg)`); }
 
   // HUD
-  const max = document.documentElement.scrollHeight - H;
-  const pr = max > 0 ? clamp(sm/max, 0, 1) : 0;
-  bar.style.width = (pr*100).toFixed(2) + '%';
-  const v = .9995*smooth(0, 1, pr)*(1 - .02*Math.min(1, Math.abs(sVel)));
-  const gam = 1/Math.sqrt(1 - v*v);
-  tV.textContent = v.toFixed(4) + ' c'; tD.textContent = '×' + gam.toFixed(2);
-  tL.textContent = Math.round(Math.pow(pr, 2.2)*4.2e6 + pr*9000).toLocaleString('en-US') + ' ly';
+  const pr = clamp(sm/docMax, 0, 1);
+  put(bar, 'transform', 'scaleX(' + pr.toFixed(4) + ')');
+  if ((activeCh === 0 || activeCh === 5) && W > 760) {   // the telemetry box is only on screen here
+    const v = .9995*smooth(0, 1, pr)*(1 - .02*Math.min(1, Math.abs(sVel)));
+    const gam = 1/Math.sqrt(1 - v*v);
+    put(tV, 'text', v.toFixed(4) + ' c'); put(tD, 'text', '×' + gam.toFixed(2));
+    put(tL, 'text', Math.round(Math.pow(pr, 2.2)*4.2e6 + pr*9000).toLocaleString('en-US') + ' ly');
+  }
 
   // adaptive resolution
   if (hasGL) {

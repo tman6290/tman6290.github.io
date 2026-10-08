@@ -12,8 +12,9 @@ A scroll-driven site where each project chapter has its own GPU-rendered world. 
 - `js/relics.js` · three.js point-cloud objects that assemble and disintegrate per chapter; GSAP ScrollTrigger entrances
 - `js/main.js` · the frame loop
 - `TofaratiFarinu_CV.pdf` · linked from the hero
+- `images/` · project screenshots: source PNGs plus the WebP (720/1280/1800w) and JPEG files the page serves
 
-External: three.js r149 and GSAP 3.12 from CDNs, Syne / Geist / Geist Mono from Google Fonts.
+External: GSAP 3.12 (deferred) and three.js r149 (loaded after the page is idle, skipped on data saver) from CDNs, Syne / Geist / Geist Mono from Google Fonts.
 
 ## Run locally
 Open `index.html` in a browser, or serve the folder (`npx serve .`). Add `?q=0.3` to render the world at 30% resolution on a slow machine.

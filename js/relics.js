@@ -6,8 +6,9 @@
    THREE.JS RELICS: one 3D object per world, assembled from dust, then disintegrated
    ===================================================================== */
 const T3 = { ok:false };
-(function(){
-  if (!window.THREE || !hasGL) return;
+function initRelics(){
+  if (!window.THREE || !hasGL || T3.ok) return;
+  const NS = lite ? .55 : 1;   // fewer points on phones and tablets
   const c = $('#t3');
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ canvas:c, alpha:true, antialias:false, powerPreference:'high-performance' }); } catch(e) { return; }
@@ -47,8 +48,8 @@ const T3 = { ok:false };
     const grp = new THREE.Group();
     const col = new THREE.Color(hex);
     const pm = new THREE.ShaderMaterial({ vertexShader:PV, fragmentShader:PF, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
-      uniforms:{ uP:{value:1}, uSize:{value:size}, uTime:{value:0}, uDpr:{value:Math.min(devicePixelRatio||1,1.5)}, uColor:{value:col} } });
-    grp.add(new THREE.Points(surfacePoints(geo, N), pm));
+      uniforms:{ uP:{value:1}, uSize:{value:size*(lite ? 1.2 : 1)}, uTime:{value:0}, uDpr:{value:dprCap()}, uColor:{value:col} } });
+    grp.add(new THREE.Points(surfacePoints(geo, Math.round(N*NS)), pm));
     const lm = new THREE.LineBasicMaterial({ color:col, transparent:true, opacity:0, depthWrite:false, blending:THREE.AdditiveBlending });
     grp.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), lm));
     grp.userData = { pm, lm, p:1 }; grp.visible = false; scene.add(grp); return grp;
@@ -87,7 +88,7 @@ const T3 = { ok:false };
   const place = { core:[0,0], icsp:[1,1], rjl:[-1,1], wolban:[1,1] };
   let active = null, posX = 0, posY = 0, baseX = 0;
   T3.ok = true;
-  T3.resize = () => { renderer.setPixelRatio(Math.min(devicePixelRatio||1, 1.5)); renderer.setSize(W,H,false); cam.aspect = W/H; cam.updateProjectionMatrix(); };
+  T3.resize = () => { renderer.setPixelRatio(dprCap()); renderer.setSize(W,H,false); cam.aspect = W/H; cam.updateProjectionMatrix(); };
   T3.resize();
   T3.frame = (key, p, t, dt, mx, my, par) => {
     const g = R[key] || null;
@@ -110,6 +111,21 @@ const T3 = { ok:false };
     g.scale.setScalar(sc*(1-u.p*.15));
     renderer.render(scene, cam);
   };
+}
+// three.js is ~600 KB, so it loads after the page is interactive instead of blocking first paint
+(function(){
+  if (!hasGL) return;
+  const c = navigator.connection;
+  if (c && (c.saveData || /(^|-)2g$/.test(c.effectiveType || ''))) return;   // data saver or 2G: skip the 3D relics
+  const load = () => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js';
+    sc.async = true; sc.crossOrigin = 'anonymous';
+    sc.onload = () => { try { initRelics(); } catch(e) { T3.ok = false; } };
+    document.head.appendChild(sc);
+  };
+  const idle = () => (window.requestIdleCallback ? requestIdleCallback(load, { timeout: 2500 }) : setTimeout(load, 300));
+  if (document.readyState === 'complete') idle(); else addEventListener('load', idle, { once:true });
 })();
 
 /* =====================================================================
@@ -124,7 +140,14 @@ if (window.gsap && window.ScrollTrigger && !reduce) {
     const bits = sec.querySelectorAll('.chips .chip, .proof div, .row .btn, .note, .ecard, .group, .tlr, .way, .credit');
     const shell = sec.querySelectorAll('.shell, .caption');
     const num = sec.querySelector('.num');
+    // on phones sections are taller than the screen, so each block reveals on its own and blur filters are skipped
     const st = { trigger: sec, start: 'top 72%', once: true };
+    if (lite) {
+      [...heads, ...shell].forEach(el => gsap.from(el, { y: 28, opacity: 0, duration: .9, ease: 'power3.out', scrollTrigger: { trigger: el, start: 'top 90%', once: true } }));
+      if (bits.length) { gsap.set(bits, { y: 20, opacity: 0 }); ScrollTrigger.batch(bits, { start: 'top 92%', once: true,
+        onEnter: b => gsap.to(b, { y: 0, opacity: 1, duration: .6, ease: 'power2.out', stagger: .04, overwrite: true }) }); }
+      return;
+    }
     if (heads.length) gsap.from(heads, { y: 54, opacity: 0, filter: 'blur(14px)', duration: 1.2, ease: 'power3.out', stagger: .09, scrollTrigger: st });
     if (bits.length) gsap.from(bits, { y: 34, opacity: 0, scale: .92, duration: .9, ease: 'back.out(1.7)', stagger: .045, delay: .25, scrollTrigger: st });
     if (shell.length) gsap.from(shell, { y: 60, opacity: 0, rotateY: -18, rotateX: 8, transformPerspective: 1200, duration: 1.4, ease: 'power3.out', delay: .15, scrollTrigger: st });
